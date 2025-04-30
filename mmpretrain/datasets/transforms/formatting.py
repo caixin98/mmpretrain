@@ -156,6 +156,7 @@ class PackInputs(BaseTransform):
                 data_sample.set_field(results[key], key, field_type='metainfo')
 
         packed_results['data_samples'] = data_sample
+        # print(data_sample.affine_matrix)
         return packed_results
 
     def __repr__(self) -> str:

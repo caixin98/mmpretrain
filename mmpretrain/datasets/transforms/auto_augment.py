@@ -1181,6 +1181,110 @@ class GaussianBlur(BaseAugTransform):
         return repr_str
 
 
+
+import torch
+import torch.nn.functional as F
+import random, math
+@TRANSFORMS.register_module()
+class TorchAffineRTS(BaseTransform):
+
+    def __init__(self,
+                 angle=(0,30),
+                 scale_factor=0.0,
+                 translate=(0.0, 0.0),
+                 pad_val=128,
+                 prob=0.5,
+                 random_negative_prob=0.5,
+                 interpolation='nearest'):
+        assert isinstance(angle, tuple), 'The angle type must be turple, but ' \
+                                         f'got {type(angle)} instead.'
+        assert isinstance(scale_factor, float), 'the scale type must be float, but ' \
+                                         f'got {type(scale_factor)} instead.'
+        if isinstance(pad_val, int):
+            pad_val = tuple([pad_val] * 3)
+        elif isinstance(pad_val, Sequence):
+            assert len(pad_val) == 3, 'pad_val as a tuple must have 3 ' \
+                                      f'elements, got {len(pad_val)} instead.'
+            assert all(isinstance(i, int) for i in pad_val), 'pad_val as a ' \
+                                                             'tuple must got elements of int type.'
+        else:
+            raise TypeError('pad_val must be int or tuple with 3 elements.')
+        assert 0 <= prob <= 1.0, 'The prob should be in range [0,1], ' \
+                                 f'got {prob} instead.'
+        assert 0 <= random_negative_prob <= 1.0, 'The random_negative_prob ' \
+                                                 f'should be in range [0,1], got {random_negative_prob} instead.'
+
+        self.angle = angle
+        self.scale_factor = scale_factor
+        self.translate = translate
+        self.pad_val = tuple(pad_val)
+        self.prob = prob
+        self.random_negative_prob = random_negative_prob
+        self.interpolation = interpolation
+
+    def transform(self, results):
+        if np.random.rand() < self.prob:
+            scale = random.uniform(1-self.scale_factor, 1+self.scale_factor)
+            #angle = random.uniform(-self.angle, self.angle)
+            angle = random.uniform(self.angle[0],self.angle[1])
+            if np.random.rand() > 0.5:
+                angle = - angle
+            translate_x = random.uniform(-self.translate[0], self.translate[0])
+            translate_y = random.uniform(-self.translate[1], self.translate[1])
+        else:
+            scale = 1.0
+            angle = 0.0
+            translate_x = 0.0
+            translate_y = 0.0
+
+        matrix_scale = torch.tensor(
+            [[1.0/scale, 0, 0],
+             [0, 1.0/scale, 0],
+             [0, 0, 1]]
+        )
+
+        sinx = math.sin(angle/180 * math.pi)
+        cosx = math.cos(angle/180 * math.pi)
+        matrix_rot = torch.tensor(
+            [[cosx, sinx, 0],
+             [-sinx, cosx, 0],
+             [0, 0, 1]]
+        )
+
+        matrix_tran = torch.tensor(
+            [[1, 0, -translate_x],
+             [0, 1, -translate_y],
+             [0, 0, 1]]
+        )
+
+        matrix = matrix_tran @ matrix_rot @ matrix_scale
+        matrix_inv = torch.inverse(matrix)
+        results['affine_matrix'] = matrix_inv[:2]
+
+        matrix = matrix[None, :2, :]
+        for key in results.get('img_fields', ['img']):
+            img = results[key]
+            c, h, w = img.shape
+            grid = F.affine_grid(matrix, torch.Size([1, c, h, w]))
+            img_processed = F.grid_sample(
+                img[None, ...], grid, mode='bilinear').squeeze(0)
+            results[key] = img_processed
+
+        return results
+
+    def __repr__(self):
+        repr_str = self.__class__.__name__
+        repr_str += f'(angle={self.angle}, '
+        #repr_str += f'center={self.center}, '
+        repr_str += f'scale={self.scale_factor}, '
+        repr_str += f'translate={self.translate}'
+        repr_str += f'pad_val={self.pad_val}, '
+        repr_str += f'prob={self.prob}, '
+        repr_str += f'random_negative_prob={self.random_negative_prob}, '
+        repr_str += f'interpolation={self.interpolation})'
+        return repr_str
+
+
 # yapf: disable
 # flake8: noqa
 AUTOAUG_POLICIES = {

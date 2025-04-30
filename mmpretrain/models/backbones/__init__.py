@@ -46,7 +46,7 @@ from .sparse_convnext import SparseConvNeXt
 from .sparse_resnet import SparseResNet
 from .swin_transformer import SwinTransformer
 from .swin_transformer_v2 import SwinTransformerV2
-from .t2t_vit import T2T_ViT
+from .t2t_vit import T2T_ViT, T2T_ViT_optical
 from .timm_backbone import TIMMBackbone
 from .tinyvit import TinyViT
 from .tnt import TNT
@@ -126,4 +126,5 @@ __all__ = [
     'HiViT',
     'SparseResNet',
     'SparseConvNeXt',
+    'T2T_ViT_optical'
 ]

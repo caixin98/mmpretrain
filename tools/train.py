@@ -9,6 +9,11 @@ from mmengine.registry import RUNNERS
 from mmengine.runner import Runner
 from mmengine.utils import digit_version
 from mmengine.utils.dl_utils import TORCH_VERSION
+# import mmcv
+from mmpretrain.utils import register_all_modules
+# from mmpretrain.utils import register_all_modules
+
+# register_all_modules()
 
 
 def parse_args():

@@ -13,7 +13,7 @@ from .itm_head import ITMHead
 from .itpn_clip_head import iTPNClipHead
 from .latent_heads import LatentCrossCorrelationHead, LatentPredictHead
 from .levit_head import LeViTClsHead
-from .linear_head import LinearClsHead
+from .linear_head import LinearClsHead, IdentityClsHead
 from .mae_head import MAEPretrainHead
 from .margin_head import ArcFaceClsHead
 from .mim_head import MIMHead
@@ -66,4 +66,5 @@ __all__ = [
     'GroundingHead',
     'iTPNClipHead',
     'SparKPretrainHead',
+    'IdentityClsHead'
 ]

@@ -13,7 +13,7 @@ from mmpretrain.registry import MODELS
 from ..utils import (MultiheadAttention, build_norm_layer, resize_pos_embed,
                      to_2tuple)
 from .base_backbone import BaseBackbone
-
+import torch.nn.functional as F
 
 class T2TTransformerLayer(BaseModule):
     """Transformer Layer for T2T_ViT.
@@ -445,3 +445,153 @@ class T2T_ViT(BaseBackbone):
             return patch_token.reshape(B, *hw, -1).permute(0, 3, 1, 2)
         if self.out_type == 'avg_featmap':
             return patch_token.mean(dim=1)
+
+@MODELS.register_module()
+class T2T_ViT_optical(T2T_ViT):
+    def __init__(self, optical, image_size = 224, **kwargs):
+        super().__init__(image_size, **kwargs)
+        if optical is not None:
+            self.optical = MODELS.build(optical)
+        else:
+            self.optical = None
+        self.image_size = image_size
+        # padding input image to (image_size, image_size) 
+        # print(self.optical.output_dim)
+        left = (image_size - self.optical.output_dim[1]) // 2
+        right = image_size - self.optical.output_dim[1] - left
+        top = (image_size - self.optical.output_dim[0]) // 2
+        bottom = image_size - self.optical.output_dim[0] - top
+        self.padding = (left, right, top, bottom)
+     
+
+    def forward(self, x, affine_matrix = None):
+        if self.optical is not None:
+            x = self.optical(x, affine_matrix)
+        else:
+            x = x
+            if affine_matrix is not None:
+                grid = F.affine_grid(affine_matrix, x.size(), align_corners=False)
+                x = F.grid_sample(x, grid)
+        x = F.pad(x, self.padding, 'constant', 0)
+        return super().forward(x)
+
+
+@MODELS.register_module()
+class T2T_ViT_optical_affine_embed(T2T_ViT):
+    def __init__(self, optical, image_size = 224, **kwargs):
+        super().__init__(image_size, **kwargs)
+        if optical is not None:
+            self.optical = MODELS.build(optical)
+        else:
+            self.optical = None
+        self.image_size = image_size
+     
+        # padding input image to (image_size, image_size) 
+        # print(self.optical.output_dim)
+        left = (image_size - self.optical.output_dim[1]) // 2
+        right = image_size - self.optical.output_dim[1] - left
+        top = (image_size - self.optical.output_dim[0]) // 2
+        bottom = image_size - self.optical.output_dim[0] - top
+        self.padding = (left, right, top, bottom)
+        self.affine_matrix2embedding = nn.Linear(6,self.embed_dims)
+
+    def forward(self, x, affine_matrix = None):
+        if self.optical is not None:
+            x = self.optical(x, affine_matrix)
+        else:
+            x = x
+            if affine_matrix is not None:
+                grid = F.affine_grid(affine_matrix, x.size(), align_corners=False)
+                x = F.grid_sample(x, grid)
+        x = F.pad(x, self.padding, 'constant', 0)
+        if affine_matrix is not None:
+            self.affine_token = self.affine_matrix2embedding(affine_matrix.view(-1,6))
+            self.affine_token = self.affine_token.unsqueeze(1)
+            x, patch_resolution = self.tokens_to_token(x)
+            x = torch.cat((self.affine_token, x), dim=1)
+            # print(x.shape,self.pos_embed.shape)
+            if self.use_pos_embed:
+                x = x + resize_pos_embed(
+                    self.pos_embed,
+                    self.patch_resolution,
+                    patch_resolution,
+                    mode=self.interpolate_mode,
+                    num_extra_tokens=self.num_extra_tokens)    
+            x = self.drop_after_pos(x)
+            outs = []
+            for i, layer in enumerate(self.encoder):
+                x = layer(x)
+
+                if i == len(self.encoder) - 1 and self.final_norm:
+                    x = self.norm(x)
+                if i in self.out_indices:
+                    B, _, C = x.shape
+                    patch_token = x[:, 1:].reshape(B, *patch_resolution, C)
+                    patch_token = patch_token.permute(0, 3, 1, 2)
+                    out = patch_token
+                    outs.append(out)
+            return tuple(outs)[0]
+        else:
+            return super().forward(x)
+
+@MODELS.register_module()
+class T2T_ViT_optical_affine_pos_embed(T2T_ViT):
+    def __init__(self, optical, image_size = 224, **kwargs):
+        super().__init__(image_size, **kwargs)
+        if optical is not None:
+            self.optical = MODELS.build(optical)
+        else:
+            self.optical = None
+        self.image_size = image_size
+        # padding input image to (image_size, image_size) 
+        # print(self.optical.output_dim)
+        left = (image_size - self.optical.output_dim[1]) // 2
+        right = image_size - self.optical.output_dim[1] - left
+        top = (image_size - self.optical.output_dim[0]) // 2
+        bottom = image_size - self.optical.output_dim[0] - top
+        self.padding = (left, right, top, bottom)
+        self.affine_matrix2embedding = nn.Sequential(
+            nn.Linear(6, 128),
+            nn.ReLU(True),
+            nn.Linear(128, self.embed_dims)
+        )
+        self.num_extra_tokens = 1
+
+    def forward(self, x, affine_matrix = None):
+        if self.optical is not None:
+            x = self.optical(x, affine_matrix)
+        else:
+            x = x
+            if affine_matrix is not None:
+                grid = F.affine_grid(affine_matrix, x.size(), align_corners=False)
+                x = F.grid_sample(x, grid)
+        x = F.pad(x, self.padding, 'constant', 0)
+        if affine_matrix is not None:
+            self.affine_token = self.affine_matrix2embedding(affine_matrix.view(-1,6))
+            self.affine_token = self.affine_token.unsqueeze(1)
+            x, patch_resolution = self.tokens_to_token(x)
+            self.affine_token_pos = self.affine_token.expand(-1, patch_resolution[0]*patch_resolution[1] + self.num_extra_tokens, -1)
+            x = torch.cat((self.affine_token, x), dim=1)
+            # print(x.shape,self.pos_embed.shape)
+            x = x + resize_pos_embed(
+                self.pos_embed,
+                self.patch_resolution,
+                patch_resolution,
+                mode=self.interpolate_mode,
+                num_extra_tokens=self.num_extra_tokens) + self.affine_token_pos
+            x = self.drop_after_pos(x)
+            outs = []
+            for i, layer in enumerate(self.encoder):
+                x = layer(x)
+
+                if i == len(self.encoder) - 1 and self.final_norm:
+                    x = self.norm(x)
+                if i in self.out_indices:
+                    B, _, C = x.shape
+                    patch_token = x[:, 1:].reshape(B, *patch_resolution, C)
+                    patch_token = patch_token.permute(0, 3, 1, 2)
+                    out = patch_token
+                    outs.append(out)
+            return tuple(outs)[0]
+        else:
+            return super().forward(x)

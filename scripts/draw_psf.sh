@@ -1,0 +1,1 @@
+python tools/analysis_tools/gen_psf_gif.py $1

@@ -7,7 +7,7 @@ from .auto_augment import (AutoAugment, AutoContrast, BaseAugTransform,
                            Brightness, ColorTransform, Contrast, Cutout,
                            Equalize, GaussianBlur, Invert, Posterize,
                            RandAugment, Rotate, Sharpness, Shear, Solarize,
-                           SolarizeAdd, Translate)
+                           SolarizeAdd, Translate, TorchAffineRTS)
 from .formatting import (Collect, NumpyToPIL, PackInputs, PackMultiTaskInputs,
                          PILToNumpy, Transpose)
 from .processing import (Albumentations, BEiTMaskGenerator, CleanCaption,
@@ -18,8 +18,10 @@ from .processing import (Albumentations, BEiTMaskGenerator, CleanCaption,
                          RandomResizedCropAndInterpolationWithTwoPic,
                          RandomTranslatePad, ResizeEdge, SimMIMMaskGenerator)
 from .utils import get_transform_idx, remove_transform
-from .wrappers import ApplyToList, MultiView
+from .pair import LoadImagePair, FlipPair,LoadImageFromFile2,StackImagePair
 
+from .wrappers import ApplyToList, MultiView
+from .propagate import Propagated
 for t in (CenterCrop, LoadImageFromFile, Normalize, RandomFlip,
           RandomGrayscale, RandomResize, Resize):
     TRANSFORMS.register_module(module=t)
@@ -37,5 +39,5 @@ __all__ = [
     'RandomFlip', 'RandomGrayscale', 'RandomResize', 'Resize', 'MultiView',
     'ApplyToList', 'CleanCaption', 'RandomTranslatePad',
     'RandomResizedCropAndInterpolationWithTwoPic', 'get_transform_idx',
-    'remove_transform', 'MAERandomResizedCrop'
+    'remove_transform', 'MAERandomResizedCrop', 'TorchAffineRTS', 'Propagated','LoadImagePair','FlipPair','LoadImageFromFile2','StackImagePair'
 ]

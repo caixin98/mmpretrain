@@ -61,3 +61,15 @@ class LinearClsHead(ClsHead):
         # The final classification head.
         cls_score = self.fc(pre_logits)
         return cls_score
+    
+@MODELS.register_module()
+class IdentityClsHead(ClsHead):
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+    def forward_train(self, x, gt_label, **kwargs):
+        x = self.pre_logits(x)
+        # cls_score = self.fc(x)
+        losses = self.loss(x, gt_label, **kwargs)
+        return losses

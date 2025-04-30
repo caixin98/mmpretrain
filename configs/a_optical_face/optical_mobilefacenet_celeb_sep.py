@@ -1,0 +1,161 @@
+
+# # from mmcv import Config
+# # _pro_base_ = Config.fromfile('configs/_base_/datasets/pipelines/propagate.py')
+# # propagated_args = _pro_base_.propagated_args
+# # _optical_base_ = Config.fromfile('configs/_base_/models/opticals/binary_conv.py')
+# # optical = _optical_base_.optical
+
+# _base_ = ['configs/_base_/datasets/pipelines/propagate.py', 'configs/_base_/models/opticals/binary_conv.py']
+import torch 
+
+optical = dict(
+    type='BinaryPsfConv',
+    feature_size = 3.45e-5,
+    sensor = "IMX250",
+    input_shape = [3, 308, 257],
+    scene2mask = 0.4,
+    mask2sensor = 0.002,
+    target_dim = [112, 96], # the dim of after conv, try to get this while keeping aspect ratio of sensor; you can also just specify output_dim for the dim of after conv without considering aspect ratio
+    requires_grad = True,
+    n_psf_mask = 1
+)
+
+
+propagated_args = dict(
+    mask2sensor=0.002,
+    scene2mask=0.4,
+    object_height=0.27,
+    sensor = "IMX250",
+    single_psf = False,
+    grayscale = False,
+    input_dim = [112, 96, 3],
+    output_dim = [308, 257, 3],
+    dtype_out = torch.float,
+)
+ 
+# checkpoint saving
+checkpoint_config = dict(interval=10)
+# yapf:disable
+log_config = dict(
+    interval=100,
+    hooks=[
+        dict(type='TextLoggerHook'),
+        # dict(type='TensorboardLoggerHook')
+    ])
+# yapf:enable
+
+dist_params = dict(backend='nccl')
+log_level = 'INFO'
+load_from = None
+resume_from = None
+workflow = [('train', 1)]
+
+
+# dataset settings
+dataset_type = 'Celeb'
+num_classes = 93955
+img_norm_cfg = dict(
+    mean=[127.5, 127.5, 127.5], std=[128.0, 128.0, 128.0], to_rgb=True)
+#img_norm_cfg = dict(
+#    mean=[123.675, 116.28, 103.53], std=[58.395, 57.12, 57.375], to_rgb=True)
+#W = np.array([[0.714, 0.714, 0],[-0.714, 0.714, 0]]).astype(np.float) 
+
+
+train_pipeline = [
+    dict(type='LoadImageFromFile'),
+    dict(type='Resize', size=(172, 172)),
+    dict(type='Pad_celeb', size=(180, 172), padding=(0,8,0,0)),
+    #dict(type='Pad', size=(180,172)),
+    dict(type='CenterCrop', crop_size=(112, 96)),
+    #dict(type='RandomResizedCrop', size=(112, 96)),
+    dict(type='RandomFlip', flip_prob=0.5, direction='horizontal'),
+    # dict(type="Normalize", **img_norm_cfg),
+    dict(type="Propagated", **propagated_args),
+    # dict(type="Normalize", **propagated_args),
+    # dict(type='AffineRTS', angle=45.0, prob=1.0),
+    # dict(type='ImageToTensor', keys=['img']),
+    dict(type='ToTensor', keys=['gt_label']),
+    # dict(type='TorchAffineRTS', angle=(0.0,0.0), prob=1.0, scale_factor=0.0, translate=(0.0, 0.0)),
+    dict(type='Collect', keys=['img', 'gt_label'])
+]
+
+test_pipeline = [
+    dict(type='LoadImagePair'),
+    dict(type='FlipPair', keys=['img1', 'img2'], keys_flip=['img1_flip', 'img2_flip']),
+    # dict(type='AffineRTS', angle=45.0, prob=1.0),
+    # dict(type="Normalize", **img_norm_cfg),
+
+    dict(type='Propagated', keys=['img1', 'img1_flip', 'img2', 'img2_flip'], **propagated_args),
+    dict(type='ToTensor', keys=['fold', 'label']),
+    # dict(type='TorchAffineRTS', angle=(0.0,0.0), prob=1.0, scale_factor=0.0, translate=(0.0, 0.0)),
+    dict(type='StackImagePair', keys=['img1', 'img1_flip', 'img2', 'img2_flip'], out_key='img'),
+    dict(type='Collect', keys=['img', 'fold', 'label'])
+]
+
+train_dir = '/mnt/workspace/RawSense/data/celebrity/'
+train_imglist = '/mnt/workspace/RawSense/data/celebrity/celebrity_data.txt'
+train_ann_file = '/mnt/workspace/RawSense/data/celebrity/celebrity_label.txt'
+# train_dir = '/mnt/lustre/shiwanxin.vendor/codes/MobileFaceNet_Pytorch-master/data/CASIA/CASIA-WebFace-112X96'
+val_dir = '/mnt/workspace/RawSense/data/lfw/'
+
+data = dict(
+    # samples_per_gpu=128,
+    workers_per_gpu=2,
+    train=dict(
+        type=dataset_type,
+        img_prefix=train_dir,
+        imglist_root=train_imglist,
+        label_root=train_ann_file,
+        pipeline=train_pipeline),
+    val=dict(
+        type='LFW',
+        img_prefix=val_dir + 'lfw-112X96',
+        pair_file=val_dir + 'pairs.txt',
+        pipeline=test_pipeline),
+    test=dict(
+        type='LFW',
+        img_prefix=val_dir + 'lfw-112X96',
+        pair_file=val_dir + 'pairs.txt',
+        pipeline=test_pipeline),
+    train_dataloader = dict(samples_per_gpu = 128),
+    val_dataloader = dict(samples_per_gpu = 32),
+
+)
+evaluation = dict(interval=1, metric='accuracy')
+
+custom_hooks = [dict(type='VisualConvHook'),
+                dict(type='VisualAfterOpticalHook')]
+
+# model settings
+model = dict(
+    type='FaceImageClassifier',
+    backbone=dict(type='MobileFaceNet_feature_optical', optical = optical),
+    neck=dict(type='GlobalDepthWiseNeck',
+              in_channels=512,
+              out_channels=128,
+              kernel_size=(8, 6)),
+    head=dict(
+        type='IdentityClsHead',
+        loss=dict(type='ArcMargin', out_features=num_classes)
+    )
+)
+
+
+# optimizer
+optimizer = dict(type='SGD', lr=0.1, momentum=0.9, weight_decay=0.0001,
+#   paramwise_cfg=dict( 
+#  custom_keys={'psf_vals': dict(lr_mult=10, decay_mult=1.0)})
+        )
+# optimizer_config = dict(grad_clip=None)
+# learning policy
+lr_config = dict(
+    policy='CosineAnnealing',
+    min_lr=0,
+    warmup='linear',
+    warmup_iters=20000,
+    warmup_ratio=0.25)
+#lr_config = None
+runner = dict(type='EpochBasedRunner', max_epochs=30)
+
+optimizer_config = dict(
+grad_clip=dict(max_norm=35, norm_type=2))
